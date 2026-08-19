@@ -1,0 +1,7 @@
+{
+  "name": "GitDeploy CI/CD Hub",
+  "description": "Nền tảng tự động hóa CI/CD, quản lý build, deploy tự động qua GitHub Webhooks, SSH Runner & AI Workflow Generator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
