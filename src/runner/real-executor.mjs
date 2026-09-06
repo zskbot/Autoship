@@ -3,34 +3,39 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-export async function runCommand(command, cwd, onLog) {
+const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
+
+export async function runCommand(command, cwd, onLog = () => {}) {
+  const timeoutMs = Number(process.env.AUTOSHIP_COMMAND_TIMEOUT_MS || DEFAULT_TIMEOUT_MS)
   await new Promise((resolve, reject) => {
-    const child = spawn('/bin/sh', ['-lc', command], { cwd, env: process.env })
+    const child = spawn('/bin/sh', ['-lc', command], { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] })
+    let finished = false
+    const timer = setTimeout(() => {
+      if (finished) return
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 5000).unref()
+      reject(new Error(`Command timed out after ${timeoutMs}ms: ${command}`))
+    }, timeoutMs)
+    const finish = (fn, value) => { if (!finished) { finished = true; clearTimeout(timer); fn(value) } }
     child.stdout.on('data', data => onLog(String(data).trimEnd()))
     child.stderr.on('data', data => onLog(String(data).trimEnd()))
-    child.on('error', reject)
-    child.on('close', code => code === 0 ? resolve() : reject(new Error(`Command failed with exit code ${code}: ${command}`)))
+    child.on('error', error => finish(reject, error))
+    child.on('close', code => code === 0 ? finish(resolve) : finish(reject, new Error(`Command failed with exit code ${code}: ${command}`)))
   })
 }
 
 export async function cloneRepository(repoUrl, branch, onLog) {
+  if (!/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?$/.test(repoUrl)) {
+    throw new Error('Only public HTTPS GitHub repositories are accepted by the built-in runner')
+  }
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'autoship-run-'))
-  await runCommand(`git clone --depth=1 --branch ${shellQuote(branch)} ${shellQuote(repoUrl)} ${shellQuote(dir)}`, process.cwd(), onLog)
-  return dir
-}
-
-export async function executeRealPipeline(project, run, stageLogger) {
-  const workspace = await cloneRepository(project.repoUrl, run.branch, line => stageLogger('clone', line))
   try {
-    await runCommand('npm ci', workspace, line => stageLogger('deps', line))
-    await runCommand('npm test --if-present', workspace, line => stageLogger('test', line))
-    await runCommand(project.buildCommand || 'npm run build', workspace, line => stageLogger('build', line))
-    return workspace
-  } finally {
-    await fs.rm(workspace, { recursive: true, force: true })
+    await runCommand(`git clone --depth=1 --branch ${shellQuote(branch)} ${shellQuote(repoUrl)} ${shellQuote(dir)}`, process.cwd(), onLog)
+    return dir
+  } catch (error) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)
+    throw error
   }
 }
 
-function shellQuote(value) {
-  return `'${String(value).replaceAll("'", "'\\''")}'`
-}
+function shellQuote(value) { return `'${String(value).replaceAll("'", "'\\''")}'` }
