@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises'
 import { cloneRepository, runCommand } from './real-executor.mjs'
 import { deployStaticArtifact } from './static-deploy.mjs'
 
@@ -19,12 +20,10 @@ export async function runRealPipeline(project, run, updateStage) {
     if (project.target === 'static-server') {
       await deployStaticArtifact(workspace, project.deployPath || '/var/www/app', line => updateStage('deploy', line))
       updateStage('deploy', 'Static artifact deployment completed', true)
+      updateStage('healthcheck', `Deployment directory verified: ${project.deployPath || '/var/www/app'}`, true)
     } else {
       updateStage('deploy', `Target '${project.target}' requires its target adapter`, false)
-    }
-
-    if (project.target === 'static-server') {
-      updateStage('healthcheck', `Deployment directory verified: ${project.deployPath || '/var/www/app'}`, true)
+      return { workspace, success: false, error: `Unsupported deployment target: ${project.target}` }
     }
 
     return { workspace, success: true }
@@ -32,5 +31,7 @@ export async function runRealPipeline(project, run, updateStage) {
     const message = error instanceof Error ? error.message : String(error)
     updateStage('current', message, false)
     return { workspace, success: false, error: message }
+  } finally {
+    if (workspace) await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined)
   }
 }
