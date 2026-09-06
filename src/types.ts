@@ -1,7 +1,6 @@
 export type DeploymentTarget = 'vps-ssh' | 'vps-webhook' | 'docker' | 'cloudrun' | 'static-server' | 'pm2';
 
 export type PipelineStatus = 'idle' | 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
-
 export type PipelineStageType = 'clone' | 'deps' | 'test' | 'build' | 'docker' | 'deploy' | 'healthcheck' | 'notify';
 
 export interface PipelineStage {
@@ -24,6 +23,7 @@ export interface DeploymentProject {
   serverPort?: number;
   serverUser?: string;
   deployPath?: string;
+  healthcheckUrl?: string;
   webhookSecret: string;
   autoDeployOnPush: boolean;
   notifyOnSuccess: boolean;
