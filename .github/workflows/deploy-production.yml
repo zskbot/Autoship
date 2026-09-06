@@ -1,0 +1,137 @@
+name: Production CD
+
+on:
+  workflow_run:
+    workflows: ["Autoship CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoship-production
+  cancel-in-progress: false
+
+env:
+  DEPLOY_PATH: /opt/autoship
+  AUTOSHIP_DOMAIN: autoship.velclaw.cfd
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deployment commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Validate required deployment secrets
+        env:
+          PROD_SERVER_IP: ${{ secrets.PROD_SERVER_IP }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          AUTOSHIP_API_TOKEN: ${{ secrets.PROD_AUTOSHIP_API_TOKEN }}
+          AUTOSHIP_RUNNER_TOKEN: ${{ secrets.PROD_AUTOSHIP_RUNNER_TOKEN }}
+          AUTOSHIP_GITHUB_TOKEN: ${{ secrets.PROD_AUTOSHIP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for name in PROD_SERVER_IP PROD_SSH_USER PROD_SSH_PRIVATE_KEY POSTGRES_PASSWORD AUTOSHIP_API_TOKEN AUTOSHIP_RUNNER_TOKEN AUTOSHIP_GITHUB_TOKEN; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        env:
+          PROD_SERVER_IP: ${{ secrets.PROD_SERVER_IP }}
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$PROD_SERVER_IP" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Sync application files
+        env:
+          PROD_SERVER_IP: ${{ secrets.PROD_SERVER_IP }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+        run: |
+          set -euo pipefail
+          ssh "$PROD_SSH_USER@$PROD_SERVER_IP" "mkdir -p '$DEPLOY_PATH'"
+          tar --exclude=.git --exclude=.github --exclude=node_modules --exclude=dist -czf /tmp/autoship-deploy.tgz .
+          scp /tmp/autoship-deploy.tgz "$PROD_SSH_USER@$PROD_SERVER_IP:$DEPLOY_PATH/autoship-deploy.tgz"
+          ssh "$PROD_SSH_USER@$PROD_SERVER_IP" "cd '$DEPLOY_PATH' && tar -xzf autoship-deploy.tgz && rm -f autoship-deploy.tgz"
+
+      - name: Write production environment and deploy
+        env:
+          PROD_SERVER_IP: ${{ secrets.PROD_SERVER_IP }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_POSTGRES_USER: ${{ secrets.PROD_POSTGRES_USER }}
+          PROD_POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          PROD_POSTGRES_DB: ${{ secrets.PROD_POSTGRES_DB }}
+          PROD_AUTOSHIP_API_TOKEN: ${{ secrets.PROD_AUTOSHIP_API_TOKEN }}
+          PROD_AUTOSHIP_RUNNER_TOKEN: ${{ secrets.PROD_AUTOSHIP_RUNNER_TOKEN }}
+          PROD_AUTOSHIP_GITHUB_TOKEN: ${{ secrets.PROD_AUTOSHIP_GITHUB_TOKEN }}
+          PROD_AUTOSHIP_CORS_ORIGINS: ${{ secrets.PROD_AUTOSHIP_CORS_ORIGINS }}
+          PROD_AUTOSHIP_TRUSTED_REPOS: ${{ secrets.PROD_AUTOSHIP_TRUSTED_REPOS }}
+        run: |
+          set -euo pipefail
+          ssh "$PROD_SSH_USER@$PROD_SERVER_IP" 'bash -s' -- \
+            "$DEPLOY_PATH" "$AUTOSHIP_DOMAIN" "$PROD_POSTGRES_USER" "$PROD_POSTGRES_PASSWORD" "$PROD_POSTGRES_DB" \
+            "$PROD_AUTOSHIP_API_TOKEN" "$PROD_AUTOSHIP_RUNNER_TOKEN" "$PROD_AUTOSHIP_GITHUB_TOKEN" \
+            "$PROD_AUTOSHIP_CORS_ORIGINS" "$PROD_AUTOSHIP_TRUSTED_REPOS" <<'REMOTE'
+          set -euo pipefail
+          DEPLOY_PATH="$1"
+          DOMAIN="$2"
+          POSTGRES_USER="$3"
+          POSTGRES_PASSWORD="$4"
+          POSTGRES_DB="$5"
+          API_TOKEN="$6"
+          RUNNER_TOKEN="$7"
+          GITHUB_TOKEN="$8"
+          CORS_ORIGINS="$9"
+          TRUSTED_REPOS="${10}"
+
+          cd "$DEPLOY_PATH"
+          umask 077
+          cat > .env.production <<EOF
+          AUTOSHIP_DOMAIN=$DOMAIN
+          AUTOSHIP_CORS_ORIGINS=$CORS_ORIGINS
+          AUTOSHIP_API_TOKEN=$API_TOKEN
+          AUTOSHIP_RUNNER_TOKEN=$RUNNER_TOKEN
+          AUTOSHIP_GITHUB_TOKEN=$GITHUB_TOKEN
+          AUTOSHIP_TRUSTED_REPOS=$TRUSTED_REPOS
+          AUTOSHIP_DATABASE_URL=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB
+          AUTOSHIP_DATABASE_SSL=false
+          POSTGRES_USER=$POSTGRES_USER
+          POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+          POSTGRES_DB=$POSTGRES_DB
+          EOF
+          chmod 600 .env.production
+
+          docker compose --env-file .env.production -f docker-compose.production.yml build --pull
+          docker compose --env-file .env.production -f docker-compose.production.yml up -d --remove-orphans
+          docker compose --env-file .env.production -f docker-compose.production.yml ps
+          REMOTE
+
+      - name: Post-deployment smoke tests
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 15 --retry-delay 3 --retry-connrefused https://$AUTOSHIP_DOMAIN/api/health
+          curl --fail --silent --show-error --retry 15 --retry-delay 3 --retry-connrefused https://$AUTOSHIP_DOMAIN/api/ready
+
+      - name: Verify remote stack health
+        if: always()
+        env:
+          PROD_SERVER_IP: ${{ secrets.PROD_SERVER_IP }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+        run: |
+          ssh "$PROD_SSH_USER@$PROD_SERVER_IP" "cd '$DEPLOY_PATH' && docker compose --env-file .env.production -f docker-compose.production.yml ps"
