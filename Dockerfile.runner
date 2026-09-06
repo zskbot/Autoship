@@ -14,8 +14,9 @@ COPY src/runner ./src/runner
 COPY src/state ./src/state
 USER autoship-runner
 ENV NODE_ENV=production
-ENV AUTOSHIP_ENABLE_REAL_RUNNER=false
+ENV PORT=3100
+ENV AUTOSHIP_ENABLE_REAL_RUNNER=true
 ENV AUTOSHIP_COMMAND_TIMEOUT_MS=900000
 ENV AUTOSHIP_MAX_LOG_BYTES=2097152
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "import('./src/runner/runner-policy.mjs').then(()=>process.exit(0)).catch(()=>process.exit(1))"
-CMD ["node", "-e", "setInterval(() => {}, 2147483647)"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "src/runner/runner-service.mjs"]
