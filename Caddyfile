@@ -1,0 +1,10 @@
+{$AUTOSHIP_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy autoship-control-plane:3000
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+  }
+}

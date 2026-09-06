@@ -1,0 +1,87 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      AUTOSHIP_DOMAIN: ${AUTOSHIP_DOMAIN:-autoship.velclaw.cfd}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      autoship-control-plane:
+        condition: service_healthy
+
+  autoship-control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AUTOSHIP_CORS_ORIGINS: ${AUTOSHIP_CORS_ORIGINS}
+      AUTOSHIP_API_TOKEN: ${AUTOSHIP_API_TOKEN}
+      AUTOSHIP_RUNNER_URL: http://autoship-runner:3100
+      AUTOSHIP_RUNNER_TOKEN: ${AUTOSHIP_RUNNER_TOKEN}
+      AUTOSHIP_DATABASE_URL: ${AUTOSHIP_DATABASE_URL}
+      AUTOSHIP_DATABASE_SSL: ${AUTOSHIP_DATABASE_SSL:-false}
+      AUTOSHIP_QUEUE_MAX_RETRIES: ${AUTOSHIP_QUEUE_MAX_RETRIES:-3}
+      AUTOSHIP_QUEUE_BACKOFF_MS: ${AUTOSHIP_QUEUE_BACKOFF_MS:-1500}
+      AUTOSHIP_RUNNER_REQUEST_TIMEOUT_MS: ${AUTOSHIP_RUNNER_REQUEST_TIMEOUT_MS:-900000}
+    expose:
+      - "3000"
+    depends_on:
+      autoship-runner:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  autoship-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      AUTOSHIP_ENABLE_REAL_RUNNER: "true"
+      AUTOSHIP_RUNNER_TOKEN: ${AUTOSHIP_RUNNER_TOKEN}
+      AUTOSHIP_GITHUB_TOKEN: ${AUTOSHIP_GITHUB_TOKEN:-}
+      AUTOSHIP_TRUSTED_REPOS: ${AUTOSHIP_TRUSTED_REPOS:-https://github.com/zskbot/AgentsIDE}
+      AUTOSHIP_COMMAND_TIMEOUT_MS: ${AUTOSHIP_COMMAND_TIMEOUT_MS:-900000}
+      AUTOSHIP_MAX_LOG_BYTES: ${AUTOSHIP_MAX_LOG_BYTES:-2097152}
+    expose:
+      - "3100"
+    volumes:
+      - autoship-runner-data:/data
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-autoship}
+      POSTGRES_USER: ${POSTGRES_USER:-autoship}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - autoship-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autoship} -d ${POSTGRES_DB:-autoship}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  caddy-data:
+  caddy-config:
+  autoship-postgres:
+  autoship-runner-data:
