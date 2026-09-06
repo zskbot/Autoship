@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-const child = spawn(process.execPath, ['dist/server.cjs'], { env: { ...process.env, AUTOSHIP_API_TOKEN: 'ci-test-token', AUTOSHIP_ENABLE_REAL_RUNNER: 'false', AUTOSHIP_CORS_ORIGINS: 'http://localhost:4173' }, stdio: ['ignore', 'pipe', 'pipe'] })
+const child = spawn(process.execPath, ['dist/server.cjs'], { env: { ...process.env, NODE_ENV: 'production', AUTOSHIP_API_TOKEN: 'ci-test-token', AUTOSHIP_ENABLE_REAL_RUNNER: 'false', AUTOSHIP_CORS_ORIGINS: 'http://localhost:4173' }, stdio: ['ignore', 'pipe', 'pipe'] })
 let output = ''
 child.stdout.on('data', chunk => { output += String(chunk) })
 child.stderr.on('data', chunk => { output += String(chunk) })
