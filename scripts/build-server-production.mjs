@@ -19,7 +19,7 @@ const persistenceNeedle = `async function persistAutoshipState() { if (!persiste
 if (!source.includes(persistenceNeedle)) throw new Error('production build wrapper: persistence marker missing')
 source = source.replace(
   persistenceNeedle,
-  `${persistenceNeedle}\nlet autoshipQueue;\nfunction startAutoshipQueue() {\n  autoshipQueue = new RunnerQueue({ runs: buildRuns, projects, persist: persistAutoshipState, runnerUrl: process.env.AUTOSHIP_RUNNER_URL, runnerToken: process.env.AUTOSHIP_RUNNER_TOKEN, maxRetries: Number(process.env.AUTOSHIP_QUEUE_MAX_RETRIES || 3), backoffMs: Number(process.env.AUTOSHIP_QUEUE_BACKOFF_MS || 1500) });\n  void autoshipQueue.restoreQueued();\n}\nstartAutoshipQueue();`,
+  `${persistenceNeedle}\nlet autoshipQueue;\nfunction startAutoshipQueue() {\n  autoshipQueue = new RunnerQueue({ runs: buildRuns, projects, persist: persistAutoshipState, runnerUrl: process.env.AUTOSHIP_RUNNER_URL, runnerToken: process.env.AUTOSHIP_RUNNER_TOKEN, maxRetries: Number(process.env.AUTOSHIP_QUEUE_MAX_RETRIES || 3), backoffMs: Number(process.env.AUTOSHIP_QUEUE_BACKOFF_MS || 1500) });\n  void autoshipQueue.restoreQueued();\n}\nvoid autoshipStateReady.then(() => startAutoshipQueue());`,
 )
 
 const functionMarker = 'async function executePipelineAsync(runId: string, project: DeploymentProject, shouldFail: boolean = false) {'
