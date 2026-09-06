@@ -1,4 +1,20 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      AUTOSHIP_DOMAIN: ${AUTOSHIP_DOMAIN:-autoship.velclaw.cfd}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      autoship-control-plane:
+        condition: service_healthy
+
   autoship-control-plane:
     build:
       context: .
@@ -15,13 +31,14 @@ services:
       AUTOSHIP_DATABASE_SSL: ${AUTOSHIP_DATABASE_SSL:-false}
       AUTOSHIP_QUEUE_MAX_RETRIES: ${AUTOSHIP_QUEUE_MAX_RETRIES:-3}
       AUTOSHIP_QUEUE_BACKOFF_MS: ${AUTOSHIP_QUEUE_BACKOFF_MS:-1500}
+      AUTOSHIP_RUNNER_REQUEST_TIMEOUT_MS: ${AUTOSHIP_RUNNER_REQUEST_TIMEOUT_MS:-900000}
+    expose:
+      - "3000"
     depends_on:
       autoship-runner:
         condition: service_healthy
       postgres:
         condition: service_healthy
-    ports:
-      - "${AUTOSHIP_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -64,5 +81,7 @@ services:
       retries: 10
 
 volumes:
+  caddy-data:
+  caddy-config:
   autoship-postgres:
   autoship-runner-data:
