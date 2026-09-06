@@ -11,6 +11,7 @@ POLL_SECONDS="${E2E_POLL_SECONDS:-5}"
 
 command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
 command -v node >/dev/null || { echo "node is required" >&2; exit 1; }
+command -v git >/dev/null || { echo "git is required" >&2; exit 1; }
 [[ -n "$API_TOKEN" ]] || { echo "AUTOSHIP_API_TOKEN is required" >&2; exit 1; }
 
 api() {
@@ -22,6 +23,11 @@ json_get() {
   node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync(0,"utf8")); const p=process.argv[1].split("."); let v=d; for(const k of p)v=v?.[k]; if(v===undefined||v===null)process.exit(2); process.stdout.write(String(v));' "$1"
 }
 
+if [[ -z "$COMMIT_HASH" ]]; then
+  COMMIT_HASH="$(git ls-remote "$REPOSITORY" "refs/heads/$BRANCH" | awk 'NR==1 {print $1}')"
+fi
+[[ "$COMMIT_HASH" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "Unable to resolve a 40-character commit SHA for $REPOSITORY#$BRANCH" >&2; exit 1; }
+
 echo "1. HTTPS health/readiness"
 api "$AUTOSHIP_HOST/api/health" | tee /tmp/autoship-health.json
 api "$AUTOSHIP_HOST/api/ready" | tee /tmp/autoship-ready.json
@@ -31,9 +37,8 @@ PROJECT_RESPONSE="$(api -X POST "$AUTOSHIP_HOST/api/projects/upsert" -d "$(node 
 PROJECT_ID="$(printf '%s' "$PROJECT_RESPONSE" | json_get project.id)"
 echo "Project: $PROJECT_ID"
 
-PAYLOAD="$(node -e 'const x={projectId:process.argv[1],branch:process.argv[2],author:"live-e2e",triggeredBy:"AgentsIDE-Live-E2E"}; if(process.argv[3])x.commitHash=process.argv[3]; console.log(JSON.stringify(x))' "$PROJECT_ID" "$BRANCH" "$COMMIT_HASH")"
-
-echo "3. Trigger real pipeline"
+echo "3. Trigger real pipeline at exact commit $COMMIT_HASH"
+PAYLOAD="$(node -e 'console.log(JSON.stringify({projectId:process.argv[1],branch:process.argv[2],commitHash:process.argv[3],author:"live-e2e",triggeredBy:"AgentsIDE-Live-E2E"}))' "$PROJECT_ID" "$BRANCH" "$COMMIT_HASH")"
 RUN_RESPONSE="$(api -X POST "$AUTOSHIP_HOST/api/pipelines/trigger" -d "$PAYLOAD")"
 RUN_ID="$(printf '%s' "$RUN_RESPONSE" | json_get run.id)"
 echo "Run: $RUN_ID"
@@ -45,7 +50,7 @@ while :; do
   echo "[$(( $(date +%s) - START ))s] status=$STATUS"
   case "$STATUS" in
     success)
-      echo "E2E PASS: AgentsIDE-style request -> Autoship -> Runner pipeline completed."
+      echo "E2E PASS: AgentsIDE-style request -> Autoship -> isolated Runner pipeline completed."
       exit 0
       ;;
     failed)
