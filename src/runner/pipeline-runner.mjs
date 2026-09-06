@@ -22,15 +22,14 @@ export async function runRealPipeline(project, run, updateStage) {
       updateStage('deploy', 'Static artifact deployment completed', true)
       updateStage('healthcheck', `Deployment directory verified: ${project.deployPath || '/var/www/app'}`, true)
     } else {
-      updateStage('deploy', `Target '${project.target}' requires its target adapter`, false)
-      return { workspace, success: false, error: `Unsupported deployment target: ${project.target}` }
+      throw new Error(`Target '${project.target}' is not implemented by the real runner yet`)
     }
 
-    return { workspace, success: true }
+    return { success: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     updateStage('current', message, false)
-    return { workspace, success: false, error: message }
+    return { success: false, error: message }
   } finally {
     if (workspace) await fs.rm(workspace, { recursive: true, force: true }).catch(() => undefined)
   }
