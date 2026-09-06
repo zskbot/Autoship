@@ -17,4 +17,8 @@ jobs:
           node-version: 24
       - run: npm install
       - run: npm run lint
+      - run: npm run test:runner
       - run: npm run build
+      - run: npm run test:api
+      - run: docker build -t autoship:ci .
+      - run: docker build -f Dockerfile.runner -t autoship-runner:ci .
