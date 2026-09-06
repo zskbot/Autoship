@@ -9,7 +9,9 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:runner": "node scripts/test-runner.mjs",
+    "test:api": "node scripts/test-api.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
