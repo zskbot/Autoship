@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 
 const root = process.cwd()
@@ -31,7 +32,8 @@ app.use('/api', (req, res, next) => {
 
 const importMarker = "import dotenv from 'dotenv';"
 if (!source.includes(importMarker)) throw new Error('dotenv import marker not found')
-let transformed = source.replace(importMarker, `${importMarker}\nimport { runRealPipeline } from './src/runner/pipeline-runner.mjs';`)
+const runnerUrl = pathToFileURL(path.join(root, 'src/runner/pipeline-runner.mjs')).href
+let transformed = source.replace(importMarker, `${importMarker}\nimport { runRealPipeline } from ${JSON.stringify(runnerUrl)};`)
 transformed = transformed.replace(marker, `${marker}${middleware}`)
 
 const functionMarker = 'async function executePipelineAsync(runId: string, project: DeploymentProject, isManual: boolean) {'
