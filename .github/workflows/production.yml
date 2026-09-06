@@ -22,9 +22,10 @@ jobs:
       - name: Validate production compose syntax
         run: |
           cp .env.production.example .env.production
-          sed -i 's/replace-with-strong-password/ci-postgres-password/' .env.production
-          sed -i 's/replace-with-64-byte-random-token/ci-api-token/' .env.production
-          sed -i '0,/replace-with-different-64-byte-random-token/s//ci-runner-token/' .env.production
+          sed -i 's/replace-with-strong-password/ci-postgres-password/g' .env.production
+          sed -i 's/replace-with-64-byte-random-token/ci-api-token/g' .env.production
+          sed -i 's/replace-with-different-64-byte-random-token/ci-runner-token/g' .env.production
+          sed -i 's#replace-me@postgres#ci-postgres-password@postgres#g' .env.production
           docker compose -f docker-compose.production.yml config
       - name: Build control plane image
         run: docker build -t autoship-control-plane:ci .
@@ -43,7 +44,7 @@ jobs:
           exit 1
       - name: Verify production auth
         run: |
-          code=$(docker compose -f docker-compose.production.yml exec -T autoship-control-plane node -e "fetch('http://127.0.0.1:3000/api/projects/upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({repoUrl:'https://github.com/zskbot/AgentsIDE'})}).then(async r=>{console.log(await r.text());process.exit(r.status===401?0:1)}).catch(()=>process.exit(1))")
+          docker compose -f docker-compose.production.yml exec -T autoship-control-plane node -e "fetch('http://127.0.0.1:3000/api/projects/upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({repoUrl:'https://github.com/zskbot/AgentsIDE'})}).then(async r=>{console.log(await r.text());process.exit(r.status===401?0:1)}).catch(()=>process.exit(1))"
       - name: Verify runner isolation endpoint
         run: |
           docker compose -f docker-compose.production.yml exec -T autoship-control-plane node -e "fetch('http://autoship-runner:3100/health').then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
@@ -51,7 +52,7 @@ jobs:
         run: |
           docker compose -f docker-compose.production.yml exec -T autoship-control-plane node -e "fetch('http://127.0.0.1:3000/api/projects/upsert',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer ci-api-token'},body:JSON.stringify({repoUrl:'https://github.com/zskbot/AgentsIDE',name:'AgentsIDE'})}).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
           docker compose -f docker-compose.production.yml restart autoship-control-plane
-          sleep 3
+          sleep 5
           docker compose -f docker-compose.production.yml exec -T autoship-control-plane node -e "fetch('http://127.0.0.1:3000/api/projects',{headers:{authorization:'Bearer ci-api-token'}}).then(async r=>{const t=await r.text();console.log(t);process.exit(r.ok&&t.includes('AgentsIDE')?0:1)}).catch(()=>process.exit(1))"
       - name: Cleanup
         if: always()
