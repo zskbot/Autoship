@@ -6,6 +6,10 @@ workers_dev = true
 [vars]
 AUTOSHIP_PUBLIC_REPO = "zskbot/Autoship"
 
+[[routes]]
+pattern = "autoship.velclaw.cfd"
+custom_domain = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "autoship"
