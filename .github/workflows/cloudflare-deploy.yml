@@ -34,16 +34,15 @@ jobs:
       TARGET_BRANCH: ${{ github.event.client_payload.branch || inputs.branch || 'main' }}
       TARGET_COMMIT: ${{ github.event.client_payload.commitHash || inputs.commit_hash }}
       RUN_ID: ${{ github.event.client_payload.runId || inputs.run_id }}
-      CALLBACK_URL: ${{ secrets.AUTOSHIP_CALLBACK_URL }}
-      CALLBACK_TOKEN: ${{ secrets.AUTOSHIP_CALLBACK_TOKEN }}
+      CALLBACK_URL: https://autoship.velclaw.cfd
+      AUTOSHIP_API_TOKEN: ${{ secrets.AUTOSHIP_API_TOKEN }}
       CF_PROJECT_PREFIX: autoship
     steps:
       - name: Mark run running
-        if: ${{ env.CALLBACK_URL != '' }}
         run: |
           curl --fail --silent --show-error -X POST "$CALLBACK_URL/api/deployments/callback" \
             -H 'content-type: application/json' \
-            -H "x-autoship-callback-token: $CALLBACK_TOKEN" \
+            -H "authorization: Bearer $AUTOSHIP_API_TOKEN" \
             -d "$(jq -nc --arg id "$RUN_ID" '{runId:$id,status:"running",message:"GitHub Actions deployment started"}')"
 
       - name: Checkout target repository
@@ -88,8 +87,8 @@ jobs:
           set -euo pipefail
           name="${TARGET_REPO##*/}"
           name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
-          name="${CF_PROJECT_PREFIX}-${name}"
           name="${name:0:58}"
+          name="${CF_PROJECT_PREFIX}-${name}"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Cloudflare Pages
@@ -101,17 +100,17 @@ jobs:
           npx --yes wrangler@4 pages deploy "${{ steps.output.outputs.dir }}" --project-name "${{ steps.project.outputs.name }}" --branch "$TARGET_BRANCH"
 
       - name: Mark run success
-        if: success() && env.CALLBACK_URL != ''
+        if: success()
         run: |
           curl --fail --silent --show-error -X POST "$CALLBACK_URL/api/deployments/callback" \
             -H 'content-type: application/json' \
-            -H "x-autoship-callback-token: $CALLBACK_TOKEN" \
+            -H "authorization: Bearer $AUTOSHIP_API_TOKEN" \
             -d "$(jq -nc --arg id "$RUN_ID" '{runId:$id,status:"success",message:"Cloudflare Pages deployment completed"}')"
 
       - name: Mark run failed
-        if: failure() && env.CALLBACK_URL != ''
+        if: failure()
         run: |
           curl --silent --show-error -X POST "$CALLBACK_URL/api/deployments/callback" \
             -H 'content-type: application/json' \
-            -H "x-autoship-callback-token: $CALLBACK_TOKEN" \
+            -H "authorization: Bearer $AUTOSHIP_API_TOKEN" \
             -d "$(jq -nc --arg id "$RUN_ID" '{runId:$id,status:"failed",message:"GitHub Actions deployment failed; inspect workflow logs"}')" || true
