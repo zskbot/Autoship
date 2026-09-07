@@ -3,17 +3,15 @@ export interface Env {
   AUTOSHIP_PUBLIC_REPO: string;
   AUTOSHIP_API_TOKEN?: string;
   AUTOSHIP_GITHUB_TOKEN?: string;
-  AUTOSHIP_CALLBACK_TOKEN?: string;
   AUTOSHIP_ALLOWED_ORIGINS?: string;
 }
 
 type Row = Record<string, any>;
 const projectView = (p: Row) => ({ id: p.id, name: p.name, repoUrl: p.repo_url, branch: p.branch, target: p.target, framework: p.framework, autoDeployOnPush: true, lastDeployStatus: p.last_deploy_status, totalBuilds: p.total_builds });
 const runView = (r: Row) => ({ id: r.id, projectId: r.project_id, status: r.status, commitHash: r.commit_hash, commitMessage: r.commit_message || r.message || "", branch: r.branch, triggeredBy: r.triggered_by || "autoship", deployedUrl: r.deployed_url, startedAt: r.started_at || r.created_at, completedAt: r.completed_at, errorMessage: r.error_message });
-const json = (data: unknown, status = 200, origin = "*") => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": origin, "access-control-allow-headers": "authorization,content-type,x-autoship-callback-token", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "cache-control": "no-store" } });
+const json = (data: unknown, status = 200, origin = "*") => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json; charset=utf-8", "access-control-allow-origin": origin, "access-control-allow-headers": "authorization,content-type", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS", "cache-control": "no-store" } });
 function requestOrigin(request: Request, env: Env) { const configured = (env.AUTOSHIP_ALLOWED_ORIGINS || "").split(",").map((v) => v.trim()).filter(Boolean); const origin = request.headers.get("origin") || ""; return configured.includes(origin) ? origin : configured[0] || "*"; }
 function authorized(request: Request, env: Env) { return !env.AUTOSHIP_API_TOKEN || request.headers.get("authorization") === `Bearer ${env.AUTOSHIP_API_TOKEN}`; }
-function callbackAuthorized(request: Request, env: Env) { return Boolean(env.AUTOSHIP_CALLBACK_TOKEN) && request.headers.get("x-autoship-callback-token") === env.AUTOSHIP_CALLBACK_TOKEN; }
 function id(prefix: string) { return `${prefix}_${crypto.randomUUID()}`; }
 function repoSlug(repoUrl: string) { const match = repoUrl.match(/github\.com\/([^/]+\/[^/#]+?)(?:\.git)?(?:[/#].*)?$/i); return match?.[1] || repoUrl; }
 
@@ -25,20 +23,19 @@ async function githubDispatch(env: Env, payload: Record<string, unknown>) {
 
 async function route(request: Request, env: Env) {
   const url = new URL(request.url), origin = requestOrigin(request, env);
-  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization,content-type,x-autoship-callback-token", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization,content-type", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
   if (url.pathname === "/api/health") return json({ ok: true, service: "autoship-control-plane", runtime: "cloudflare-workers" }, 200, origin);
   if (url.pathname === "/api/ready") { try { await env.DB.prepare("SELECT 1").first(); return json({ ok: true, database: "d1" }, 200, origin); } catch (error) { return json({ ok: false, error: String(error) }, 503, origin); } }
 
+  const mutating = request.method !== "GET";
+  if (mutating && !authorized(request, env)) return json({ error: "Unauthorized" }, 401, origin);
+
   if (url.pathname === "/api/deployments/callback" && request.method === "POST") {
-    if (!callbackAuthorized(request, env)) return json({ error: "Unauthorized" }, 401, origin);
     const body = await request.json<Record<string, unknown>>(), runId = String(body.runId || ""), status = String(body.status || "");
     if (!runId || !["queued", "running", "success", "failed", "cancelled"].includes(status)) return json({ error: "Invalid callback" }, 400, origin);
     await env.DB.prepare("UPDATE runs SET status=?, updated_at=?, message=? WHERE id=?").bind(status, new Date().toISOString(), body.message ? String(body.message) : null, runId).run();
     return json({ ok: true }, 200, origin);
   }
-
-  const mutating = request.method !== "GET";
-  if (mutating && !authorized(request, env)) return json({ error: "Unauthorized" }, 401, origin);
 
   if (url.pathname === "/api/projects" && request.method === "GET") { const rows = await env.DB.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all(); return json({ projects: rows.results.map(projectView) }, 200, origin); }
   if (url.pathname === "/api/projects/upsert" && request.method === "POST") {
