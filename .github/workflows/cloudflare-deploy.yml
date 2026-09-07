@@ -1,0 +1,117 @@
+name: Autoship Cloudflare Deployment
+
+on:
+  repository_dispatch:
+    types: [autoship_deploy]
+  workflow_dispatch:
+    inputs:
+      repository:
+        required: true
+        type: string
+      branch:
+        required: false
+        default: main
+        type: string
+      commit_hash:
+        required: false
+        type: string
+      run_id:
+        required: true
+        type: string
+
+concurrency:
+  group: autoship-deploy-${{ github.event.client_payload.repo || inputs.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      TARGET_REPO: ${{ github.event.client_payload.repo || inputs.repository }}
+      TARGET_BRANCH: ${{ github.event.client_payload.branch || inputs.branch || 'main' }}
+      TARGET_COMMIT: ${{ github.event.client_payload.commitHash || inputs.commit_hash }}
+      RUN_ID: ${{ github.event.client_payload.runId || inputs.run_id }}
+      CALLBACK_URL: ${{ secrets.AUTOSHIP_CALLBACK_URL }}
+      CALLBACK_TOKEN: ${{ secrets.AUTOSHIP_CALLBACK_TOKEN }}
+      CF_PROJECT_PREFIX: autoship
+    steps:
+      - name: Mark run running
+        if: ${{ env.CALLBACK_URL != '' }}
+        run: |
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/api/deployments/callback" \
+            -H 'content-type: application/json' \
+            -H "x-autoship-callback-token: $CALLBACK_TOKEN" \
+            -d "$(jq -nc --arg id "$RUN_ID" '{runId:$id,status:"running",message:"GitHub Actions deployment started"}')"
+
+      - name: Checkout target repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.TARGET_REPO }}
+          ref: ${{ env.TARGET_COMMIT || env.TARGET_BRANCH }}
+          token: ${{ secrets.DEPLOY_GITHUB_TOKEN || github.token }}
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Test
+        run: |
+          if npm run | grep -qE '^  test'; then npm test; else echo 'No test script; continuing'; fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Locate static output
+        id: output
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in dist build out; do
+            if [[ -d "$dir" ]]; then echo "dir=$dir" >> "$GITHUB_OUTPUT"; exit 0; fi
+          done
+          echo 'No dist/build/out directory found after build' >&2
+          exit 1
+
+      - name: Derive Pages project name
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="${TARGET_REPO##*/}"
+          name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+          name="${CF_PROJECT_PREFIX}-${name}"
+          name="${name:0:58}"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4 pages project create "${{ steps.project.outputs.name }}" --production-branch "$TARGET_BRANCH" || true
+          npx --yes wrangler@4 pages deploy "${{ steps.output.outputs.dir }}" --project-name "${{ steps.project.outputs.name }}" --branch "$TARGET_BRANCH"
+
+      - name: Mark run success
+        if: success() && env.CALLBACK_URL != ''
+        run: |
+          curl --fail --silent --show-error -X POST "$CALLBACK_URL/api/deployments/callback" \
+            -H 'content-type: application/json' \
+            -H "x-autoship-callback-token: $CALLBACK_TOKEN" \
+            -d "$(jq -nc --arg id "$RUN_ID" '{runId:$id,status:"success",message:"Cloudflare Pages deployment completed"}')"
+
+      - name: Mark run failed
+        if: failure() && env.CALLBACK_URL != ''
+        run: |
+          curl --silent --show-error -X POST "$CALLBACK_URL/api/deployments/callback" \
+            -H 'content-type: application/json' \
+            -H "x-autoship-callback-token: $CALLBACK_TOKEN" \
+            -d "$(jq -nc --arg id "$RUN_ID" '{runId:$id,status:"failed",message:"GitHub Actions deployment failed; inspect workflow logs"}')" || true
