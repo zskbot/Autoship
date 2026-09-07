@@ -78,3 +78,25 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           npx wrangler@4 deploy
+
+      - name: Verify and attach custom domain
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          domains_json="$(curl --fail-with-body --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/domains?hostname=autoship.velclaw.cfd" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Accept: application/json')"
+          if jq -e '.success == true and any(.result[]?; .hostname == "autoship.velclaw.cfd" and .service == "autoship-control-plane")' >/dev/null <<<"${domains_json}"; then
+            echo 'Autoship custom domain is attached.'
+          else
+            curl --fail-with-body --silent --show-error \
+              -X PUT "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/domains" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data '{"hostname":"autoship.velclaw.cfd","service":"autoship-control-plane","zone_name":"velclaw.cfd"}'
+            echo
+          fi
