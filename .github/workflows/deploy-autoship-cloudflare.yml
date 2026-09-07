@@ -100,3 +100,31 @@ jobs:
               --data '{"hostname":"autoship.velclaw.cfd","service":"autoship-control-plane","zone_name":"velclaw.cfd"}'
             echo
           fi
+
+      - name: Verify or provision proxied DNS
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          zone_json="$(curl --fail-with-body --silent --show-error \
+            "https://api.cloudflare.com/client/v4/zones?name=velclaw.cfd&status=active" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Accept: application/json')"
+          zone_id="$(jq -r '.result[0].id // empty' <<<"${zone_json}")"
+          [[ -n "$zone_id" ]] || { echo 'Cloudflare DNS zone velclaw.cfd is not available to this API token.' >&2; exit 1; }
+          records="$(curl --fail-with-body --silent --show-error \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=autoship.velclaw.cfd" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Accept: application/json')"
+          if jq -e '.success == true and any(.result[]?; .name == "autoship.velclaw.cfd" and .type == "AAAA")' >/dev/null <<<"${records}"; then
+            echo 'Autoship DNS record already exists.'
+          else
+            curl --fail-with-body --silent --show-error \
+              -X POST "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data '{"type":"AAAA","name":"autoship.velclaw.cfd","content":"100::","ttl":1,"proxied":true,"comment":"Autoship Worker custom-domain placeholder"}'
+            echo
+          fi
