@@ -1,0 +1,8 @@
+name = "autoship-control-plane-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-09-07"
+workers_dev = true
+
+[[services]]
+binding = "AUTOSHIP"
+service = "autoship-control-plane"
