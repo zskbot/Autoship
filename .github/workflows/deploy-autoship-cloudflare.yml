@@ -29,6 +29,23 @@ jobs:
 
       - run: npm install
 
+      - name: Validate required secrets
+        env:
+          AUTOSHIP_API_TOKEN: ${{ secrets.AUTOSHIP_API_TOKEN }}
+          AUTOSHIP_GITHUB_TOKEN: ${{ secrets.AUTOSHIP_GITHUB_TOKEN }}
+          AUTOSHIP_CALLBACK_TOKEN: ${{ secrets.AUTOSHIP_CALLBACK_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "${AUTOSHIP_API_TOKEN:-}" ]] || missing+=(AUTOSHIP_API_TOKEN)
+          [[ -n "${AUTOSHIP_GITHUB_TOKEN:-}" ]] || missing+=(AUTOSHIP_GITHUB_TOKEN)
+          [[ -n "${AUTOSHIP_CALLBACK_TOKEN:-}" ]] || missing+=(AUTOSHIP_CALLBACK_TOKEN)
+          if (( ${#missing[@]} )); then
+            printf 'Missing required GitHub Actions secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Provision D1 database
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
