@@ -47,7 +47,7 @@ jobs:
           d1_json="$(curl --fail-with-body --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/d1/database?per_page=100" -H "Authorization: Bearer ${CLOUDFLARE_D1_API_TOKEN}" -H 'Accept: application/json')"
           jq -e '.success == true and (.result | type == "array")' >/dev/null <<<"${d1_json}" || { echo 'Cloudflare D1 token is invalid for this account or lacks D1 Read/Edit permission.' >&2; exit 1; }
           echo 'Cloudflare D1 token is accepted.'
-          echo 'Cloudflare Workers token will be used only for Worker deployment.'
+          echo 'Cloudflare Workers token will be used for Worker secrets and deployment.'
       - name: Provision D1 database
         env:
           CLOUDFLARE_D1_API_TOKEN: ${{ secrets.CLOUDFLARE_D1_API_TOKEN }}
@@ -71,15 +71,22 @@ jobs:
           echo "D1 database ready: ${db_id}"
       - name: Set Worker secrets
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
+          CLOUDFLARE_WORKERS_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           AUTOSHIP_API_TOKEN: ${{ secrets.AUTOSHIP_API_TOKEN }}
           AUTOSHIP_GITHUB_TOKEN: ${{ secrets.AUTOSHIP_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' "$AUTOSHIP_API_TOKEN" | npx wrangler@4 secret put AUTOSHIP_API_TOKEN
-          printf '%s' "$AUTOSHIP_GITHUB_TOKEN" | npx wrangler@4 secret put AUTOSHIP_GITHUB_TOKEN
+          endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/autoship-control-plane/secrets"
+          put_secret() {
+            local name="$1" text="$2" response
+            response="$(jq -nc --arg name "$name" --arg text "$text" '{name:$name,text:$text,type:"secret_text"}' | curl --fail-with-body --silent --show-error -X PUT "$endpoint" -H "Authorization: Bearer ${CLOUDFLARE_WORKERS_API_TOKEN}" -H 'Content-Type: application/json' --data @- )"
+            jq -e '.success == true' >/dev/null <<<"${response}" || { echo "Cloudflare rejected Worker secret ${name}. Token needs Workers Scripts Write/Edit for this account." >&2; cat <<<"${response}"; exit 1; }
+          }
+          put_secret AUTOSHIP_API_TOKEN "$AUTOSHIP_API_TOKEN"
+          put_secret AUTOSHIP_GITHUB_TOKEN "$AUTOSHIP_GITHUB_TOKEN"
+          echo 'Worker secrets are configured.'
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_WORKERS_API_TOKEN }}
