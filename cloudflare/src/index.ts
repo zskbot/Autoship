@@ -42,7 +42,7 @@ async function route(request: Request, env: Env) {
   if (mutating && !authorized(request, env)) return json({ error: "Unauthorized" }, 401, origin);
 
   if (url.pathname === "/api/deployments/callback" && request.method === "POST") {
-    const body = await request.json<Record<string, unknown>>(), runId = String(body.runId || ""), status = String(body.status || "");
+    const body = await request.json() as Record<string, unknown>, runId = String(body.runId || ""), status = String(body.status || "");
     if (!runId || !["queued", "running", "success", "failed", "cancelled"].includes(status)) return json({ error: "Invalid callback" }, 400, origin);
     await env.DB.prepare("UPDATE runs SET status=?, updated_at=?, message=? WHERE id=?").bind(status, new Date().toISOString(), body.message ? String(body.message) : null, runId).run();
     return json({ ok: true }, 200, origin);
@@ -50,7 +50,7 @@ async function route(request: Request, env: Env) {
 
   if (url.pathname === "/api/projects" && request.method === "GET") { const rows = await env.DB.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all(); return json({ projects: rows.results.map(projectView) }, 200, origin); }
   if (url.pathname === "/api/projects/upsert" && request.method === "POST") {
-    const body = await request.json<Record<string, unknown>>(), repoUrl = String(body.repoUrl || "").trim();
+    const body = await request.json() as Record<string, unknown>, repoUrl = String(body.repoUrl || "").trim();
     if (!repoUrl) return json({ error: "repoUrl is required" }, 400, origin);
     const now = new Date().toISOString(), existing = await env.DB.prepare("SELECT * FROM projects WHERE repo_url=?").bind(repoUrl).first<Row>();
     const project = { id: existing?.id || id("project"), repo_url: repoUrl, name: String(body.name || existing?.name || repoUrl.split("/").pop() || "Project"), branch: String(body.branch || existing?.branch || "main"), target: String(body.target || existing?.target || "cloudflare-pages"), framework: body.framework ? String(body.framework) : (existing?.framework || null), created_at: existing?.created_at || now, updated_at: now };
@@ -60,7 +60,7 @@ async function route(request: Request, env: Env) {
   const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
   if (projectMatch && request.method === "DELETE") { await env.DB.prepare("DELETE FROM projects WHERE id=?").bind(projectMatch[1]).run(); return json({ ok: true }, 200, origin); }
   if (url.pathname === "/api/pipelines/trigger" && request.method === "POST") {
-    const body = await request.json<Record<string, unknown>>(), projectId = String(body.projectId || ""), project = await env.DB.prepare("SELECT * FROM projects WHERE id=?").bind(projectId).first<Row>();
+    const body = await request.json() as Record<string, unknown>, projectId = String(body.projectId || ""), project = await env.DB.prepare("SELECT * FROM projects WHERE id=?").bind(projectId).first<Row>();
     if (!project) return json({ error: "Project not found" }, 404, origin);
     const runId = id("run"), now = new Date().toISOString(), commitHash = body.commitHash ? String(body.commitHash) : null, branch = String(body.branch || project.branch);
     const run = { id: runId, project_id: projectId, status: "queued", commit_hash: commitHash, branch, created_at: now, updated_at: now, message: "Queued for GitHub Actions", triggered_by: body.triggeredBy || "autoship" };
