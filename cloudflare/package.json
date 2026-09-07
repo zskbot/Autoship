@@ -1,0 +1,12 @@
+{
+  "name": "autoship-cloudflare-control-plane",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy --config wrangler.toml"
+  },
+  "devDependencies": {
+    "wrangler": "^4.33.0"
+  }
+}
