@@ -1,0 +1,15 @@
+name = "autoship-control-plane"
+main = "src/index.ts"
+compatibility_date = "2026-09-07"
+workers_dev = true
+
+[vars]
+AUTOSHIP_PUBLIC_REPO = "zskbot/Autoship"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "autoship"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[observability]
+enabled = true
