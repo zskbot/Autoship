@@ -21,19 +21,17 @@ const json = (data: unknown, status = 200, origin = "*") =>
 
 function requestOrigin(request: Request, env: Env) {
   const configured = (env.AUTOSHIP_ALLOWED_ORIGINS || "").split(",").map((v) => v.trim()).filter(Boolean);
-  const origin = request.headers.get("origin") || "");
+  const origin = request.headers.get("origin") || "";
   return configured.includes(origin) ? origin : configured[0] || "*";
 }
 
 function authorized(request: Request, env: Env) {
   if (!env.AUTOSHIP_API_TOKEN) return true;
-  const value = request.headers.get("authorization") || "";
-  return value === `Bearer ${env.AUTOSHIP_API_TOKEN}`;
+  return request.headers.get("authorization") === `Bearer ${env.AUTOSHIP_API_TOKEN}`;
 }
 
 function callbackAuthorized(request: Request, env: Env) {
-  if (!env.AUTOSHIP_CALLBACK_TOKEN) return false;
-  return request.headers.get("x-autoship-callback-token") === env.AUTOSHIP_CALLBACK_TOKEN;
+  return Boolean(env.AUTOSHIP_CALLBACK_TOKEN) && request.headers.get("x-autoship-callback-token") === env.AUTOSHIP_CALLBACK_TOKEN;
 }
 
 function id(prefix: string) {
@@ -60,7 +58,9 @@ async function route(request: Request, env: Env) {
   const url = new URL(request.url);
   const origin = requestOrigin(request, env);
 
-  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization,content-type,x-autoship-callback-token", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: { "access-control-allow-origin": origin, "access-control-allow-headers": "authorization,content-type,x-autoship-callback-token", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
+  }
 
   if (url.pathname === "/api/health") return json({ ok: true, service: "autoship-control-plane", runtime: "cloudflare-workers" }, 200, origin);
   if (url.pathname === "/api/ready") {
@@ -74,8 +74,7 @@ async function route(request: Request, env: Env) {
     const runId = String(body.runId || "");
     const status = String(body.status || "");
     if (!runId || !["queued", "running", "success", "failed", "cancelled"].includes(status)) return json({ error: "Invalid callback" }, 400, origin);
-    await env.DB.prepare("UPDATE runs SET status=?, updated_at=?, message=? WHERE id=?")
-      .bind(status, new Date().toISOString(), body.message ? String(body.message) : null, runId).run();
+    await env.DB.prepare("UPDATE runs SET status=?, updated_at=?, message=? WHERE id=?").bind(status, new Date().toISOString(), body.message ? String(body.message) : null, runId).run();
     return json({ ok: true }, 200, origin);
   }
 
@@ -103,9 +102,7 @@ async function route(request: Request, env: Env) {
       created_at: existing?.created_at || now,
       updated_at: now,
     };
-    await env.DB.prepare(`INSERT INTO projects (id,repo_url,name,branch,target,framework,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)
-      ON CONFLICT(repo_url) DO UPDATE SET name=excluded.name,branch=excluded.branch,target=excluded.target,framework=excluded.framework,updated_at=excluded.updated_at`)
-      .bind(project.id, project.repo_url, project.name, project.branch, project.target, project.framework, project.created_at, project.updated_at).run();
+    await env.DB.prepare(`INSERT INTO projects (id,repo_url,name,branch,target,framework,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(repo_url) DO UPDATE SET name=excluded.name,branch=excluded.branch,target=excluded.target,framework=excluded.framework,updated_at=excluded.updated_at`).bind(project.id, project.repo_url, project.name, project.branch, project.target, project.framework, project.created_at, project.updated_at).run();
     return json({ project }, existing ? 200 : 201, origin);
   }
 
@@ -123,10 +120,10 @@ async function route(request: Request, env: Env) {
     const runId = id("run");
     const now = new Date().toISOString();
     const commitHash = body.commitHash ? String(body.commitHash) : null;
-    await env.DB.prepare("INSERT INTO runs (id,project_id,status,commit_hash,branch,created_at,updated_at,message) VALUES (?,?,?,?,?,?,?,?)")
-      .bind(runId, projectId, "queued", commitHash, String(body.branch || project.branch), now, now, "Queued for GitHub Actions").run();
+    const branch = String(body.branch || project.branch);
+    await env.DB.prepare("INSERT INTO runs (id,project_id,status,commit_hash,branch,created_at,updated_at,message) VALUES (?,?,?,?,?,?,?,?)").bind(runId, projectId, "queued", commitHash, branch, now, now, "Queued for GitHub Actions").run();
     try {
-      await githubDispatch(env, { runId, projectId, repoUrl: project.repo_url, branch: String(body.branch || project.branch), commitHash, target: project.target });
+      await githubDispatch(env, { runId, projectId, repoUrl: project.repo_url, branch, commitHash, target: project.target });
     } catch (error) {
       await env.DB.prepare("UPDATE runs SET status='failed',updated_at=?,message=? WHERE id=?").bind(new Date().toISOString(), String(error), runId).run();
       return json({ error: "Unable to dispatch GitHub Actions", run: { id: runId, status: "failed" } }, 502, origin);
