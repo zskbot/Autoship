@@ -33,14 +33,12 @@ jobs:
         env:
           AUTOSHIP_API_TOKEN: ${{ secrets.AUTOSHIP_API_TOKEN }}
           AUTOSHIP_GITHUB_TOKEN: ${{ secrets.AUTOSHIP_GITHUB_TOKEN }}
-          AUTOSHIP_CALLBACK_TOKEN: ${{ secrets.AUTOSHIP_CALLBACK_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           missing=()
           [[ -n "${AUTOSHIP_API_TOKEN:-}" ]] || missing+=(AUTOSHIP_API_TOKEN)
           [[ -n "${AUTOSHIP_GITHUB_TOKEN:-}" ]] || missing+=(AUTOSHIP_GITHUB_TOKEN)
-          [[ -n "${AUTOSHIP_CALLBACK_TOKEN:-}" ]] || missing+=(AUTOSHIP_CALLBACK_TOKEN)
           if (( ${#missing[@]} )); then
             printf 'Missing required GitHub Actions secrets: %s\n' "${missing[*]}" >&2
             exit 1
@@ -68,13 +66,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           AUTOSHIP_API_TOKEN: ${{ secrets.AUTOSHIP_API_TOKEN }}
           AUTOSHIP_GITHUB_TOKEN: ${{ secrets.AUTOSHIP_GITHUB_TOKEN }}
-          AUTOSHIP_CALLBACK_TOKEN: ${{ secrets.AUTOSHIP_CALLBACK_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           printf '%s' "$AUTOSHIP_API_TOKEN" | npx wrangler@4 secret put AUTOSHIP_API_TOKEN
           printf '%s' "$AUTOSHIP_GITHUB_TOKEN" | npx wrangler@4 secret put AUTOSHIP_GITHUB_TOKEN
-          printf '%s' "$AUTOSHIP_CALLBACK_TOKEN" | npx wrangler@4 secret put AUTOSHIP_CALLBACK_TOKEN
 
       - name: Deploy Worker
         env:
