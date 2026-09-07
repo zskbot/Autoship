@@ -57,4 +57,9 @@ jobs:
           docker compose --env-file .env.production -f docker-compose.production.yml exec -T autoship-control-plane node -e "fetch('http://127.0.0.1:3000/api/projects',{headers:{authorization:'Bearer ci-api-token'}}).then(async r=>{const t=await r.text();console.log(t);process.exit(r.ok&&t.includes('AgentsIDE')?0:1)}).catch(()=>process.exit(1))"
       - name: Cleanup
         if: always()
-        run: docker compose --env-file .env.production -f docker-compose.production.yml down -v
+        run: |
+          if [[ -f .env.production ]]; then
+            docker compose --env-file .env.production -f docker-compose.production.yml down -v
+          else
+            docker compose -f docker-compose.production.yml down -v
+          fi
