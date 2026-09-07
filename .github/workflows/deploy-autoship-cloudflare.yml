@@ -1,0 +1,68 @@
+name: Deploy Autoship Control Plane to Cloudflare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudflare/**'
+      - '.github/workflows/deploy-autoship-cloudflare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: cloudflare/package.json
+
+      - run: npm install
+
+      - name: Provision D1 database
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          db_id="$(npx wrangler@4 d1 list --json | jq -r '.[] | select(.name=="autoship") | .uuid' | head -n1)"
+          if [[ -z "$db_id" || "$db_id" == "null" ]]; then
+            npx wrangler@4 d1 create autoship --location apac > /tmp/d1-create.txt
+            db_id="$(grep -Eo '[0-9a-fA-F-]{36}' /tmp/d1-create.txt | tail -n1)"
+          fi
+          [[ "$db_id" =~ ^[0-9a-fA-F-]{36}$ ]] || { cat /tmp/d1-create.txt 2>/dev/null || true; echo 'Unable to determine D1 database id' >&2; exit 1; }
+          sed -i "s/REPLACE_WITH_D1_DATABASE_ID/$db_id/" wrangler.toml
+          npx wrangler@4 d1 execute autoship --remote --yes --file=schema.sql
+
+      - name: Set Worker secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTOSHIP_API_TOKEN: ${{ secrets.AUTOSHIP_API_TOKEN }}
+          AUTOSHIP_GITHUB_TOKEN: ${{ secrets.AUTOSHIP_GITHUB_TOKEN }}
+          AUTOSHIP_CALLBACK_TOKEN: ${{ secrets.AUTOSHIP_CALLBACK_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$AUTOSHIP_API_TOKEN" | npx wrangler@4 secret put AUTOSHIP_API_TOKEN
+          printf '%s' "$AUTOSHIP_GITHUB_TOKEN" | npx wrangler@4 secret put AUTOSHIP_GITHUB_TOKEN
+          printf '%s' "$AUTOSHIP_CALLBACK_TOKEN" | npx wrangler@4 secret put AUTOSHIP_CALLBACK_TOKEN
+
+      - name: Deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTOSHIP_ALLOWED_ORIGINS: ${{ secrets.AUTOSHIP_ALLOWED_ORIGINS }}
+        run: |
+          npx wrangler@4 deploy --var "AUTOSHIP_ALLOWED_ORIGINS:${AUTOSHIP_ALLOWED_ORIGINS}"
